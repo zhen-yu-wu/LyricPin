@@ -1,0 +1,42 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Pp]ublish/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test and coverage output
+[Tt]est[Rr]esult*/
+coverage/
+*.coverage
+*.coveragexml
+
+# NuGet packages and generated files
+packages/
+*.nupkg
+*.snupkg
+project.lock.json
+
+# Logs, diagnostics, and temporary files
+*.log
+*.tmp
+*.temp
+*.dmp
+*.etl
+
+# Windows metadata
+Thumbs.db
+Desktop.ini
+
+# Local publish profiles and signing material
+*.pubxml.user
+*.pfx
+*.snk
