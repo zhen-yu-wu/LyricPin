@@ -15,7 +15,7 @@ internal static class AcrylicMenuHelper
 
     internal static void Attach(ToolStripDropDown menu)
     {
-        menu.Opacity = 0.97;
+        menu.Opacity = 0.99;
         menu.Opened += (_, _) => Apply(menu.Handle);
 
         foreach (ToolStripItem item in menu.Items)
@@ -57,7 +57,10 @@ internal static class AcrylicMenuHelper
                 ref backdropType,
                 sizeof(int));
 
-            ApplyLegacyAcrylic(windowHandle);
+            if (Environment.OSVersion.Version.Build < 22000)
+            {
+                ApplyLegacyAcrylic(windowHandle);
+            }
         }
         catch (DllNotFoundException)
         {

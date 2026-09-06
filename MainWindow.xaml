@@ -12,9 +12,46 @@
         ShowInTaskbar="False"
         Topmost="True"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
-    <Grid Background="Transparent">
+    <Window.Resources>
+        <Style x:Key="PlaybackControlButton" TargetType="Button">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#F2FFFFFF" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonSurface"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="15">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonSurface" Property="Background" Value="#32FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonSurface" Property="Background" Value="#526C8CFF" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid x:Name="RootGrid"
+          Background="Transparent"
+          MouseEnter="RootGrid_MouseEnter"
+          MouseLeave="RootGrid_MouseLeave">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <ScrollViewer x:Name="LyricsViewport"
@@ -72,6 +109,13 @@
                        Opacity="0.58"
                        RenderTransformOrigin="0.5,0.5"
                        TextAlignment="Center">
+                <TextBlock.Effect>
+                    <DropShadowEffect BlurRadius="4"
+                                      Direction="270"
+                                      Opacity="0.72"
+                                      ShadowDepth="1"
+                                      Color="#D0000000" />
+                </TextBlock.Effect>
                 <TextBlock.RenderTransform>
                     <TransformGroup>
                         <ScaleTransform x:Name="PreviousLyricScaleTransform" />
@@ -79,44 +123,54 @@
                     </TransformGroup>
                 </TextBlock.RenderTransform>
             </TextBlock>
-            <Grid x:Name="CurrentLyricRow"
-                  Margin="0,2"
-                  HorizontalAlignment="Center"
-                  RenderTransformOrigin="0.5,0.5">
-                <Grid.RenderTransform>
-                    <TransformGroup>
-                        <ScaleTransform x:Name="CurrentLyricScaleTransform" />
-                        <TranslateTransform x:Name="CurrentLyricTranslateTransform" />
-                    </TransformGroup>
-                </Grid.RenderTransform>
-                <TextBlock x:Name="CurrentLyricBaseText"
-                           HorizontalAlignment="Center"
-                           FontFamily="Segoe UI"
-                           FontSize="20"
-                           FontWeight="SemiBold"
-                           Foreground="#78FFFFFF"
-                           Text="正在连接网易云音乐…"
-                           TextAlignment="Center" />
-                <TextBlock x:Name="CurrentLyricText"
-                           HorizontalAlignment="Center"
-                           FontFamily="Segoe UI"
-                           FontSize="20"
-                           FontWeight="SemiBold"
-                           Foreground="White"
-                           Text="正在连接网易云音乐…"
-                           TextAlignment="Center">
-                    <TextBlock.Clip>
-                        <RectangleGeometry x:Name="CurrentLyricClip" />
-                    </TextBlock.Clip>
-                    <TextBlock.Effect>
-                        <DropShadowEffect BlurRadius="5"
-                                          Direction="270"
-                                          Opacity="0.85"
-                                          ShadowDepth="2"
-                                          Color="#CC000000" />
-                    </TextBlock.Effect>
-                </TextBlock>
-            </Grid>
+            <ScrollViewer x:Name="CurrentLyricViewport"
+                          Width="300"
+                          HorizontalAlignment="Center"
+                          HorizontalContentAlignment="Left"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Disabled"
+                          CanContentScroll="False"
+                          ClipToBounds="True"
+                          Focusable="False">
+                <Grid x:Name="CurrentLyricRow"
+                      Margin="0,2"
+                      HorizontalAlignment="Left"
+                      RenderTransformOrigin="0.5,0.5">
+                    <Grid.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="CurrentLyricScaleTransform" />
+                            <TranslateTransform x:Name="CurrentLyricTranslateTransform" />
+                        </TransformGroup>
+                    </Grid.RenderTransform>
+                    <TextBlock x:Name="CurrentLyricBaseText"
+                               HorizontalAlignment="Center"
+                               FontFamily="Segoe UI"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               Foreground="#78FFFFFF"
+                               Text="正在连接网易云音乐…"
+                               TextAlignment="Center" />
+                    <TextBlock x:Name="CurrentLyricText"
+                               HorizontalAlignment="Center"
+                               FontFamily="Segoe UI"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               Foreground="White"
+                               Text="正在连接网易云音乐…"
+                               TextAlignment="Center">
+                        <TextBlock.Clip>
+                            <RectangleGeometry x:Name="CurrentLyricClip" />
+                        </TextBlock.Clip>
+                        <TextBlock.Effect>
+                            <DropShadowEffect BlurRadius="5"
+                                              Direction="270"
+                                              Opacity="0.85"
+                                              ShadowDepth="2"
+                                              Color="#CC000000" />
+                        </TextBlock.Effect>
+                    </TextBlock>
+                </Grid>
+            </ScrollViewer>
             <TextBlock x:Name="NextLyricText"
                        HorizontalAlignment="Center"
                        FontFamily="Segoe UI"
@@ -125,6 +179,13 @@
                        Opacity="0.58"
                        RenderTransformOrigin="0.5,0.5"
                        TextAlignment="Center">
+                <TextBlock.Effect>
+                    <DropShadowEffect BlurRadius="4"
+                                      Direction="270"
+                                      Opacity="0.72"
+                                      ShadowDepth="1"
+                                      Color="#D0000000" />
+                </TextBlock.Effect>
                 <TextBlock.RenderTransform>
                     <TransformGroup>
                         <ScaleTransform x:Name="NextLyricScaleTransform" />
@@ -148,6 +209,49 @@
                   Height="3"
                   VerticalAlignment="Center"
                   Background="#FF42A5F5" />
+        </Grid>
+        <Grid x:Name="PlaybackControlsHost"
+              Grid.Row="2"
+              Height="42"
+              Background="Transparent">
+            <Border x:Name="PlaybackControlsPanel"
+                    Width="{Binding ActualWidth, ElementName=LyricsViewport}"
+                    MaxWidth="140"
+                    Height="36"
+                    Padding="4,3"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Background="#C5222630"
+                    BorderBrush="#55FFFFFF"
+                    BorderThickness="1"
+                    CornerRadius="18"
+                    IsHitTestVisible="False"
+                    Opacity="0">
+                <Border.Effect>
+                    <DropShadowEffect Color="#CC000000"
+                                      BlurRadius="14"
+                                      ShadowDepth="3"
+                                      Opacity="0.45" />
+                </Border.Effect>
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="PlaybackControlsTranslateTransform" Y="6" />
+                </Border.RenderTransform>
+                <UniformGrid Columns="3">
+                    <Button Content="&#xE892;"
+                            ToolTip="上一首"
+                            Style="{StaticResource PlaybackControlButton}"
+                            Click="PreviousTrackButton_Click" />
+                    <Button x:Name="PlayPauseOverlayButton"
+                            Content="&#xE769;"
+                            ToolTip="暂停"
+                            Style="{StaticResource PlaybackControlButton}"
+                            Click="PlayPauseButton_Click" />
+                    <Button Content="&#xE893;"
+                            ToolTip="下一首"
+                            Style="{StaticResource PlaybackControlButton}"
+                            Click="NextTrackButton_Click" />
+                </UniformGrid>
+            </Border>
         </Grid>
     </Grid>
 </Window>

@@ -39,6 +39,26 @@ public sealed class CloudMusicCdpService : IDisposable
         "window.__lyricpin_lyric_requested_at=now;try{window.__lyricpin_store_provider.getDispatch()" +
         "({type:'async:lyric/fetchLyric',payload:{force:true}});}catch{}}" +
         "if(trackChanged||now-Number(window.__lyricpin_lyric_requested_at||0)<200)lines=[];" +
+        "const localYrc=String(l.yrcInfo?.yrc||'');" +
+        "if(trackId&&window.__lyricpin_remote_yrc_track!==trackId){" +
+        "window.__lyricpin_remote_yrc_track=trackId;window.__lyricpin_remote_yrc='';" +
+        "fetch('https://music.163.com/api/song/lyric?id='+encodeURIComponent(trackId)+'&lv=1&kv=1&tv=-1&yv=1')" +
+        ".then(response=>response.ok?response.json():null).then(data=>{" +
+        "if(window.__lyricpin_remote_yrc_track===trackId)window.__lyricpin_remote_yrc=String(data?.yrc?.lyric||'');" +
+        "}).catch(()=>{});}" +
+        "const remoteYrc=window.__lyricpin_remote_yrc_track===trackId?String(window.__lyricpin_remote_yrc||''):'';" +
+        "if(lines.length>0){const yrcRaw=remoteYrc.length>=localYrc.length?remoteYrc:localYrc;" +
+        "if(window.__lyricpin_yrc_source!==yrcRaw){window.__lyricpin_yrc_source=yrcRaw;" +
+        "const parsed=[];const linePattern=/\\[(\\d+),(\\d+)\\]([^\\r\\n]*)/g;let match;" +
+        "while((match=linePattern.exec(yrcRaw))!==null){const words=[];" +
+        "const wordPattern=/\\((\\d+),(\\d+),\\d+\\)([^\\(]*)/g;let wordMatch;" +
+        "while((wordMatch=wordPattern.exec(match[3]))!==null){words.push({" +
+        "start:Number(wordMatch[1])/1000,duration:Number(wordMatch[2])/1000,text:String(wordMatch[3]||'')});}" +
+        "const lyric=words.map(word=>word.text).join('');if(lyric){parsed.push({" +
+        "time:Number(match[1])/1000,duration:Number(match[2])/1000,lyric,words});}}" +
+        "window.__lyricpin_yrc_lines=parsed;}" +
+        "const yrcLines=Array.isArray(window.__lyricpin_yrc_lines)?window.__lyricpin_yrc_lines:[];" +
+        "if(yrcLines.length>0)lines=yrcLines;}" +
         "const progress=window.__lyricpin_progress||{};" +
         "let position=Number(progress.current);" +
         "if(Number.isFinite(position)&&Number(p.resourceDuration)>0&&position>Number(p.resourceDuration)*10)position/=1000;" +
@@ -48,15 +68,36 @@ public sealed class CloudMusicCdpService : IDisposable
         "const line=index>=0?lines[index]:null;" +
         "const previous=index>0?lines[index-1]:null;" +
         "const next=index+1<lines.length?lines[index+1]:null;" +
-        "let lineProgress=0;if(line){const start=Number(line.time);" +
-        "const end=next?Number(next.time):Number(p.resourceDuration);" +
-        "lineProgress=Number.isFinite(end)&&end>start?Math.max(0,Math.min(1,(position-start)/(end-start))):1;}" +
+        "let lineProgress=0;if(line){const words=Array.isArray(line.words)?line.words:[];" +
+        "if(words.length>0&&Number.isFinite(position)){let total=0,completed=0;" +
+        "for(const word of words)total+=Array.from(word.text).length;" +
+        "for(const word of words){const units=Array.from(word.text).length;const start=Number(word.start);" +
+        "const duration=Math.max(0.001,Number(word.duration));if(position>=start+duration){completed+=units;continue;}" +
+        "if(position>start)completed+=units*Math.max(0,Math.min(1,(position-start)/duration));break;}" +
+        "lineProgress=total>0?Math.max(0,Math.min(1,completed/total)):0;}else{" +
+        "const start=Number(line.time);const end=next?Number(next.time):Number(p.resourceDuration);" +
+        "lineProgress=Number.isFinite(end)&&end>start?Math.max(0,Math.min(1,(position-start)/(end-start))):1;}}" +
         "const artists=Array.isArray(p.resourceArtists)?p.resourceArtists.map(a=>a&&a.name).filter(Boolean):[];" +
         "return {id:trackId," +
         "name:String(p.resourceName||''),artist:artists.join(' / ')," +
-        "duration:Number(p.resourceDuration||0),playing:Number(p.playingState||0)===1," +
+        "duration:Number(p.resourceDuration||0),playing:Number(p.playingState||0)===2," +
         "index,previousText:previous?String(previous.lyric||''):''," +
         "text:line?String(line.lyric||''):'',nextText:next?String(next.lyric||''):'',lineProgress};})()";
+
+    private const string PreviousTrackExpression =
+        "(()=>{const dispatch=window.__lyricpin_store_provider?.getDispatch?.();" +
+        "if(typeof dispatch!=='function')return false;" +
+        "dispatch({type:'playingList/jump2Track',payload:{flag:-1,type:'call'}});return true;})()";
+
+    private const string TogglePlaybackExpression =
+        "(()=>{const dispatch=window.__lyricpin_store_provider?.getDispatch?.();" +
+        "if(typeof dispatch!=='function')return false;" +
+        "dispatch({type:'playing/switchResumeOrPause',payload:{}});return true;})()";
+
+    private const string NextTrackExpression =
+        "(()=>{const dispatch=window.__lyricpin_store_provider?.getDispatch?.();" +
+        "if(typeof dispatch!=='function')return false;" +
+        "dispatch({type:'playingList/jump2Track',payload:{flag:1,type:'call'}});return true;})()";
 
     private readonly HttpClient _httpClient = new()
     {
@@ -68,6 +109,12 @@ public sealed class CloudMusicCdpService : IDisposable
     private int _messageId;
 
     public bool IsConnected => _socket?.State == WebSocketState.Open;
+
+    public Task<bool> PreviousTrackAsync() => ExecuteCommandAsync(PreviousTrackExpression);
+
+    public Task<bool> TogglePlaybackAsync() => ExecuteCommandAsync(TogglePlaybackExpression);
+
+    public Task<bool> NextTrackAsync() => ExecuteCommandAsync(NextTrackExpression);
 
     public async Task<CloudMusicLyricSnapshot?> GetCurrentLyricAsync()
     {
@@ -94,6 +141,26 @@ public sealed class CloudMusicCdpService : IDisposable
         ResetConnection();
         _httpClient.Dispose();
         _gate.Dispose();
+    }
+
+    private async Task<bool> ExecuteCommandAsync(string expression)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            await EnsureConnectedAsync();
+            var result = await EvaluateAsync(expression);
+            return result.ValueKind == JsonValueKind.True;
+        }
+        catch
+        {
+            ResetConnection();
+            return false;
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     private async Task EnsureConnectedAsync()
