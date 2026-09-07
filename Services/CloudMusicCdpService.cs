@@ -27,8 +27,8 @@ public sealed class CloudMusicCdpService : IDisposable
         "window.__lyricpin_progress={current:Number(e.position),playId:e.playId,updatedAt:Date.now()};}});" +
         "window.__lyricpin_progress_registered=true;}return true;})()";
 
-    private const string LyricExpression =
-        "(()=>{const state=window.__lyricpin_store_provider.getStore();" +
+    private const string InstallLyricReaderExpression =
+        "(()=>{window.__lyricpin_read_snapshot__=()=>{const state=window.__lyricpin_store_provider.getStore();" +
         "const p=state.playing;const l=state['async:lyric'];" +
         "const trackId=String(p.resourceTrackId||p.onlineResourceId||'');" +
         "const now=Date.now();const trackChanged=window.__lyricpin_lyric_track_id!==trackId;" +
@@ -52,8 +52,8 @@ public sealed class CloudMusicCdpService : IDisposable
         "const parsed=[];const linePattern=/\\[(\\d+),(\\d+)\\]([^\\r\\n]*)/g;let match;" +
         "while((match=linePattern.exec(yrcRaw))!==null){const words=[];" +
         "const wordPattern=/\\((\\d+),(\\d+),\\d+\\)([^\\(]*)/g;let wordMatch;" +
-        "while((wordMatch=wordPattern.exec(match[3]))!==null){words.push({" +
-        "start:Number(wordMatch[1])/1000,duration:Number(wordMatch[2])/1000,text:String(wordMatch[3]||'')});}" +
+        "while((wordMatch=wordPattern.exec(match[3]))!==null){const text=String(wordMatch[3]||'');words.push({" +
+        "start:Number(wordMatch[1])/1000,duration:Number(wordMatch[2])/1000,text,units:Array.from(text).length});}" +
         "const lyric=words.map(word=>word.text).join('');if(lyric){parsed.push({" +
         "time:Number(match[1])/1000,duration:Number(match[2])/1000,lyric,words});}}" +
         "window.__lyricpin_yrc_lines=parsed;}" +
@@ -70,8 +70,8 @@ public sealed class CloudMusicCdpService : IDisposable
         "const next=index+1<lines.length?lines[index+1]:null;" +
         "let lineProgress=0;if(line){const words=Array.isArray(line.words)?line.words:[];" +
         "if(words.length>0&&Number.isFinite(position)){let total=0,completed=0;" +
-        "for(const word of words)total+=Array.from(word.text).length;" +
-        "for(const word of words){const units=Array.from(word.text).length;const start=Number(word.start);" +
+        "for(const word of words)total+=Number(word.units)||Array.from(word.text).length;" +
+        "for(const word of words){const units=Number(word.units)||Array.from(word.text).length;const start=Number(word.start);" +
         "const duration=Math.max(0.001,Number(word.duration));if(position>=start+duration){completed+=units;continue;}" +
         "if(position>start)completed+=units*Math.max(0,Math.min(1,(position-start)/duration));break;}" +
         "lineProgress=total>0?Math.max(0,Math.min(1,completed/total)):0;}else{" +
@@ -82,7 +82,9 @@ public sealed class CloudMusicCdpService : IDisposable
         "name:String(p.resourceName||''),artist:artists.join(' / ')," +
         "duration:Number(p.resourceDuration||0),playing:Number(p.playingState||0)===2," +
         "index,previousText:previous?String(previous.lyric||''):''," +
-        "text:line?String(line.lyric||''):'',nextText:next?String(next.lyric||''):'',lineProgress};})()";
+        "text:line?String(line.lyric||''):'',nextText:next?String(next.lyric||''):'',lineProgress};};return true;})()";
+
+    private const string LyricExpression = "window.__lyricpin_read_snapshot__()";
 
     private const string PreviousTrackExpression =
         "(()=>{const dispatch=window.__lyricpin_store_provider?.getDispatch?.();" +
@@ -104,9 +106,12 @@ public sealed class CloudMusicCdpService : IDisposable
         Timeout = TimeSpan.FromSeconds(1)
     };
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly byte[] _receiveBuffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+    private readonly MemoryStream _messageBuffer = new(16 * 1024);
 
     private ClientWebSocket? _socket;
     private int _messageId;
+    private bool _disposed;
 
     public bool IsConnected => _socket?.State == WebSocketState.Open;
 
@@ -138,9 +143,17 @@ public sealed class CloudMusicCdpService : IDisposable
 
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         ResetConnection();
         _httpClient.Dispose();
         _gate.Dispose();
+        _messageBuffer.Dispose();
+        ArrayPool<byte>.Shared.Return(_receiveBuffer);
     }
 
     private async Task<bool> ExecuteCommandAsync(string expression)
@@ -193,6 +206,12 @@ public sealed class CloudMusicCdpService : IDisposable
         if (ready.ValueKind != JsonValueKind.True)
         {
             throw new InvalidOperationException("网易云播放器尚未完成初始化。");
+        }
+
+        var readerReady = await EvaluateAsync(InstallLyricReaderExpression);
+        if (readerReady.ValueKind != JsonValueKind.True)
+        {
+            throw new InvalidOperationException("歌词读取器初始化失败。");
         }
     }
 
@@ -248,32 +267,29 @@ public sealed class CloudMusicCdpService : IDisposable
         }
     }
 
-    private static async Task<byte[]> ReceiveMessageAsync(ClientWebSocket socket)
+    private async Task<ReadOnlyMemory<byte>> ReceiveMessageAsync(ClientWebSocket socket)
     {
-        var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
-        try
-        {
-            using var message = new MemoryStream(16 * 1024);
-            WebSocketReceiveResult result;
+        _messageBuffer.SetLength(0);
+        WebSocketReceiveResult result;
 
-            do
+        do
+        {
+            result = await socket.ReceiveAsync(_receiveBuffer, CancellationToken.None);
+            if (result.MessageType == WebSocketMessageType.Close)
             {
-                result = await socket.ReceiveAsync(buffer, CancellationToken.None);
-                if (result.MessageType == WebSocketMessageType.Close)
-                {
-                    throw new WebSocketException("网易云关闭了调试连接。");
-                }
-
-                message.Write(buffer, 0, result.Count);
+                throw new WebSocketException("网易云关闭了调试连接。");
             }
-            while (!result.EndOfMessage);
 
-            return message.ToArray();
+            _messageBuffer.Write(_receiveBuffer, 0, result.Count);
         }
-        finally
+        while (!result.EndOfMessage);
+
+        if (!_messageBuffer.TryGetBuffer(out var message))
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            throw new InvalidOperationException("无法读取网易云响应缓冲区。");
         }
+
+        return new ReadOnlyMemory<byte>(message.Array!, message.Offset, message.Count);
     }
 
     private static CloudMusicLyricSnapshot? ParseSnapshot(JsonElement value)

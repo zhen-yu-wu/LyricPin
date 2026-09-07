@@ -52,8 +52,16 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
+        <Border x:Name="LyricBackdrop"
+                Grid.RowSpan="2"
+                Margin="2"
+                Background="#33171A21"
+                BorderBrush="Transparent"
+                BorderThickness="0"
+                CornerRadius="16"
+                IsHitTestVisible="False"
+                Opacity="0" />
         <ScrollViewer x:Name="LyricsViewport"
                       Grid.Row="0"
                       Width="300"
@@ -149,7 +157,15 @@
                                FontWeight="SemiBold"
                                Foreground="#78FFFFFF"
                                Text="正在连接网易云音乐…"
-                               TextAlignment="Center" />
+                               TextAlignment="Center">
+                        <TextBlock.Effect>
+                            <DropShadowEffect BlurRadius="5"
+                                              Direction="270"
+                                              Opacity="0.85"
+                                              ShadowDepth="2"
+                                              Color="#CC000000" />
+                        </TextBlock.Effect>
+                    </TextBlock>
                     <TextBlock x:Name="CurrentLyricText"
                                HorizontalAlignment="Center"
                                FontFamily="Segoe UI"
@@ -161,13 +177,6 @@
                         <TextBlock.Clip>
                             <RectangleGeometry x:Name="CurrentLyricClip" />
                         </TextBlock.Clip>
-                        <TextBlock.Effect>
-                            <DropShadowEffect BlurRadius="5"
-                                              Direction="270"
-                                              Opacity="0.85"
-                                              ShadowDepth="2"
-                                              Color="#CC000000" />
-                        </TextBlock.Effect>
                     </TextBlock>
                 </Grid>
             </ScrollViewer>
@@ -210,48 +219,52 @@
                   VerticalAlignment="Center"
                   Background="#FF42A5F5" />
         </Grid>
-        <Grid x:Name="PlaybackControlsHost"
-              Grid.Row="2"
-              Height="42"
-              Background="Transparent">
-            <Border x:Name="PlaybackControlsPanel"
-                    Width="{Binding ActualWidth, ElementName=LyricsViewport}"
-                    MaxWidth="140"
-                    Height="36"
-                    Padding="4,3"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Top"
-                    Background="#C5222630"
-                    BorderBrush="#55FFFFFF"
-                    BorderThickness="1"
-                    CornerRadius="18"
-                    IsHitTestVisible="False"
-                    Opacity="0">
-                <Border.Effect>
-                    <DropShadowEffect Color="#CC000000"
-                                      BlurRadius="14"
-                                      ShadowDepth="3"
-                                      Opacity="0.45" />
-                </Border.Effect>
-                <Border.RenderTransform>
-                    <TranslateTransform x:Name="PlaybackControlsTranslateTransform" Y="6" />
-                </Border.RenderTransform>
-                <UniformGrid Columns="3">
-                    <Button Content="&#xE892;"
-                            ToolTip="上一首"
-                            Style="{StaticResource PlaybackControlButton}"
-                            Click="PreviousTrackButton_Click" />
-                    <Button x:Name="PlayPauseOverlayButton"
-                            Content="&#xE769;"
-                            ToolTip="暂停"
-                            Style="{StaticResource PlaybackControlButton}"
-                            Click="PlayPauseButton_Click" />
-                    <Button Content="&#xE893;"
-                            ToolTip="下一首"
-                            Style="{StaticResource PlaybackControlButton}"
-                            Click="NextTrackButton_Click" />
-                </UniformGrid>
-            </Border>
-        </Grid>
+        <Popup x:Name="PlaybackControlsPopup"
+               Placement="Bottom"
+               PlacementTarget="{Binding ElementName=RootGrid}"
+               AllowsTransparency="True"
+               StaysOpen="True"
+               Focusable="False"
+               PopupAnimation="None">
+            <Grid x:Name="PlaybackControlsPopupSurface"
+                  Width="{Binding ActualWidth, ElementName=RootGrid}"
+                  Height="42"
+                  Background="Transparent"
+                  MouseEnter="PlaybackControlsPopupSurface_MouseEnter"
+                  MouseLeave="PlaybackControlsPopupSurface_MouseLeave">
+                <Border x:Name="PlaybackControlsPanel"
+                        Width="{Binding ActualWidth, ElementName=LyricsViewport}"
+                        MaxWidth="140"
+                        Height="36"
+                        Padding="4,3"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Background="#FF242630"
+                        BorderBrush="Transparent"
+                        BorderThickness="0"
+                        CornerRadius="18"
+                        IsHitTestVisible="False"
+                        Opacity="0">
+                    <Border.RenderTransform>
+                        <TranslateTransform x:Name="PlaybackControlsTranslateTransform" Y="6" />
+                    </Border.RenderTransform>
+                    <UniformGrid Columns="3">
+                        <Button Content="&#xE892;"
+                                ToolTip="上一首"
+                                Style="{StaticResource PlaybackControlButton}"
+                                Click="PreviousTrackButton_Click" />
+                        <Button x:Name="PlayPauseOverlayButton"
+                                Content="&#xE769;"
+                                ToolTip="暂停"
+                                Style="{StaticResource PlaybackControlButton}"
+                                Click="PlayPauseButton_Click" />
+                        <Button Content="&#xE893;"
+                                ToolTip="下一首"
+                                Style="{StaticResource PlaybackControlButton}"
+                                Click="NextTrackButton_Click" />
+                    </UniformGrid>
+                </Border>
+            </Grid>
+        </Popup>
     </Grid>
 </Window>

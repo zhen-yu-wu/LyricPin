@@ -6,11 +6,11 @@ namespace LyricPin.Ui;
 
 public sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
 {
-    private static readonly Color HoverColor = Color.FromArgb(38, 255, 255, 255);
-    private static readonly Color CheckedColor = Color.FromArgb(24, 108, 140, 255);
-    private static readonly Color AccentColor = Color.FromArgb(108, 140, 255);
-    private static readonly Color BorderColor = Color.FromArgb(48, 255, 255, 255);
-    private static readonly Color MutedColor = Color.FromArgb(145, 153, 169);
+    private static readonly Color HoverColor = Color.FromArgb(234, 227, 235);
+    private static readonly Color CheckedColor = Color.FromArgb(235, 210, 230);
+    private static readonly Color AccentColor = Color.FromArgb(193, 63, 176);
+    private static readonly Color BorderColor = Color.FromArgb(205, 198, 208);
+    private static readonly Color MutedColor = Color.FromArgb(92, 84, 100);
 
     public ModernMenuRenderer()
         : base(new ModernMenuColorTable())
@@ -25,27 +25,38 @@ public sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
             return;
         }
 
+        var role = e.Item.Tag as string ?? string.Empty;
         var isChecked = e.Item is ToolStripMenuItem { Checked: true };
-        if (!e.Item.Selected && !isChecked)
+        var isPrimary = role.StartsWith("primary:", StringComparison.Ordinal);
+        if (e.Item.Selected || isChecked || isPrimary)
         {
-            return;
+            var bounds = new Rectangle(5, 2, Math.Max(1, e.Item.Width - 10), Math.Max(1, e.Item.Height - 4));
+            using var path = CreateRoundedRectangle(bounds, 9);
+            var isDanger = string.Equals(role, "danger", StringComparison.Ordinal);
+            var background = e.Item.Selected
+                ? isDanger
+                    ? Color.FromArgb(38, 255, 92, 92)
+                    : isPrimary
+                        ? Color.FromArgb(232, 207, 228)
+                        : HoverColor
+                : isChecked
+                    ? CheckedColor
+                    : Color.FromArgb(244, 229, 241);
+            using var brush = new SolidBrush(background);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.FillPath(brush, path);
         }
 
-        var bounds = new Rectangle(6, 2, Math.Max(1, e.Item.Width - 12), Math.Max(1, e.Item.Height - 4));
-        using var path = CreateRoundedRectangle(bounds, 8);
-        var isDanger = string.Equals(e.Item.Tag as string, "danger", StringComparison.Ordinal);
-        var background = e.Item.Selected
-            ? isDanger ? Color.FromArgb(38, 255, 92, 92) : HoverColor
-            : CheckedColor;
-        using var brush = new SolidBrush(background);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        e.Graphics.FillPath(brush, path);
+        if (role.StartsWith("group:", StringComparison.Ordinal) || isPrimary)
+        {
+            DrawMenuIcon(e.Graphics, e.Item.Bounds, role, e.Item.Selected);
+        }
 
         if (isChecked)
         {
             using var accentBrush = new SolidBrush(AccentColor);
             using var accentPath = CreateRoundedRectangle(
-                new Rectangle(6, Math.Max(4, e.Item.Height / 2 - 7), 3, 14),
+                new Rectangle(5, Math.Max(4, e.Item.Height / 2 - 7), 3, 14),
                 2);
             e.Graphics.FillPath(accentBrush, accentPath);
         }
@@ -58,11 +69,11 @@ public sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
                            !string.IsNullOrEmpty(menuItem.ShortcutKeyDisplayString) &&
                            string.Equals(e.Text, menuItem.ShortcutKeyDisplayString, StringComparison.Ordinal);
         e.TextColor = isStatusText
-            ? MutedColor
+            ? e.Item.Selected ? Color.FromArgb(73, 64, 80) : MutedColor
             : isDanger && e.Item.Selected
-                ? Color.FromArgb(255, 178, 178)
+                ? Color.FromArgb(177, 40, 48)
                 : e.Item.Enabled
-                    ? Color.FromArgb(239, 242, 248)
+                    ? Color.FromArgb(31, 27, 35)
                     : MutedColor;
         base.OnRenderItemText(e);
     }
@@ -70,15 +81,15 @@ public sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
     protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
     {
         var y = e.Item.Height / 2;
-        using var pen = new Pen(Color.FromArgb(42, 255, 255, 255));
-        e.Graphics.DrawLine(pen, 16, y, Math.Max(16, e.Item.Width - 16), y);
+        using var pen = new Pen(Color.FromArgb(212, 205, 215));
+        e.Graphics.DrawLine(pen, 14, y, Math.Max(14, e.Item.Width - 14), y);
     }
 
     protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
     {
         var centerX = e.ArrowRectangle.Left + e.ArrowRectangle.Width / 2;
         var centerY = e.ArrowRectangle.Top + e.ArrowRectangle.Height / 2;
-        using var pen = new Pen(e.Item?.Enabled != false ? Color.FromArgb(205, 210, 220) : MutedColor, 1.5f)
+        using var pen = new Pen(e.Item?.Enabled != false ? Color.FromArgb(70, 63, 77) : MutedColor, 1.5f)
         {
             StartCap = LineCap.Round,
             EndCap = LineCap.Round
@@ -123,17 +134,75 @@ public sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
         var bounds = new Rectangle(Point.Empty, e.ToolStrip.Size);
         using var brush = new LinearGradientBrush(
             bounds,
-            Color.FromArgb(226, 30, 33, 41),
-            Color.FromArgb(232, 23, 26, 33),
+            Color.FromArgb(255, 252, 251, 253),
+            Color.FromArgb(255, 244, 241, 246),
             LinearGradientMode.Vertical);
         e.Graphics.FillRectangle(brush, bounds);
+
+        using var glowBrush = new SolidBrush(Color.FromArgb(11, AccentColor));
+        e.Graphics.FillEllipse(glowBrush, e.ToolStrip.Width - 118, -62, 150, 118);
     }
 
     protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
     {
-        var bounds = new Rectangle(0, 0, Math.Max(1, e.ToolStrip.Width - 1), Math.Max(1, e.ToolStrip.Height - 1));
+        var bounds = new Rectangle(1, 1, Math.Max(1, e.ToolStrip.Width - 3), Math.Max(1, e.ToolStrip.Height - 3));
         using var pen = new Pen(BorderColor);
-        e.Graphics.DrawRectangle(pen, bounds);
+        using var path = CreateRoundedRectangle(bounds, 11);
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        e.Graphics.DrawPath(pen, path);
+    }
+
+    private static void DrawMenuIcon(Graphics graphics, Rectangle itemBounds, string role, bool selected)
+    {
+        var centerY = itemBounds.Height / 2;
+        var tile = new Rectangle(11, centerY - 10, 20, 20);
+        using var tilePath = CreateRoundedRectangle(tile, 6);
+        using var tileBrush = new SolidBrush(Color.FromArgb(selected ? 50 : 28, AccentColor));
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.FillPath(tileBrush, tilePath);
+
+        using var pen = new Pen(selected ? Color.FromArgb(139, 37, 126) : Color.FromArgb(113, 65, 108), 1.6f)
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+            LineJoin = LineJoin.Round
+        };
+        var x = tile.Left;
+        var y = tile.Top;
+        if (role.EndsWith("playback", StringComparison.Ordinal))
+        {
+            using var playPath = new GraphicsPath();
+            playPath.AddPolygon(new[]
+            {
+                new Point(x + 8, y + 6),
+                new Point(x + 15, y + 10),
+                new Point(x + 8, y + 14)
+            });
+            using var iconBrush = new SolidBrush(pen.Color);
+            graphics.FillPath(iconBrush, playPath);
+        }
+        else if (role.EndsWith("lyrics", StringComparison.Ordinal))
+        {
+            graphics.DrawLine(pen, x + 6, y + 6, x + 14, y + 6);
+            graphics.DrawLine(pen, x + 5, y + 10, x + 15, y + 10);
+            graphics.DrawLine(pen, x + 7, y + 14, x + 13, y + 14);
+        }
+        else if (role.EndsWith("backdrop", StringComparison.Ordinal))
+        {
+            graphics.DrawEllipse(pen, x + 5, y + 5, 10, 10);
+            graphics.DrawArc(pen, x + 8, y + 8, 7, 7, 205, 185);
+        }
+        else if (role.EndsWith("window", StringComparison.Ordinal))
+        {
+            graphics.DrawRectangle(pen, x + 5, y + 6, 10, 9);
+            graphics.DrawLine(pen, x + 5, y + 9, x + 15, y + 9);
+        }
+        else
+        {
+            graphics.DrawEllipse(pen, x + 4, y + 7, 12, 7);
+            using var pupilBrush = new SolidBrush(pen.Color);
+            graphics.FillEllipse(pupilBrush, x + 8, y + 9, 4, 4);
+        }
     }
 
     private static GraphicsPath CreateRoundedRectangle(Rectangle bounds, int radius)
@@ -151,13 +220,13 @@ public sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
 
 public sealed class ModernMenuColorTable : ProfessionalColorTable
 {
-    private static readonly Color Background = Color.FromArgb(228, 25, 28, 35);
+    private static readonly Color Background = Color.FromArgb(255, 248, 246, 249);
 
     public override Color ToolStripDropDownBackground => Background;
     public override Color ImageMarginGradientBegin => Background;
     public override Color ImageMarginGradientMiddle => Background;
     public override Color ImageMarginGradientEnd => Background;
-    public override Color MenuBorder => Color.FromArgb(64, 255, 255, 255);
+    public override Color MenuBorder => Color.Transparent;
     public override Color MenuItemBorder => Color.Transparent;
     public override Color MenuItemSelected => Color.Transparent;
     public override Color MenuItemSelectedGradientBegin => Color.Transparent;
@@ -165,6 +234,6 @@ public sealed class ModernMenuColorTable : ProfessionalColorTable
     public override Color MenuItemPressedGradientBegin => Background;
     public override Color MenuItemPressedGradientMiddle => Background;
     public override Color MenuItemPressedGradientEnd => Background;
-    public override Color SeparatorDark => Color.FromArgb(38, 255, 255, 255);
+    public override Color SeparatorDark => Color.FromArgb(212, 205, 215);
     public override Color SeparatorLight => Color.Transparent;
 }

@@ -15,7 +15,7 @@ namespace LyricPin;
 
 public partial class MainWindow : Window
 {
-    private static readonly Drawing.Color ReadableBlue = Drawing.Color.FromArgb(79, 124, 255);
+    private static readonly Drawing.Color ReadableAccent = Drawing.Color.FromArgb(193, 63, 176);
     private const int GwlExStyle = -20;
     private const long WsExTransparent = 0x00000020L;
     private static readonly IntPtr HwndTopmost = new(-1);
@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _syncTimer;
     private readonly DispatcherTimer _marqueeRestartTimer;
     private readonly DispatcherTimer _widthIndicatorTimer;
+    private readonly DispatcherTimer _playbackControlsHideTimer;
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly Forms.ContextMenuStrip _trayMenu;
     private readonly Forms.ToolStripMenuItem _showHideMenuItem;
@@ -36,12 +37,17 @@ public partial class MainWindow : Window
     private readonly Forms.ToolStripMenuItem _alwaysOnTopMenuItem;
     private readonly Forms.ToolStripMenuItem _lockPositionMenuItem;
     private readonly Forms.ToolStripMenuItem _mouseThroughMenuItem;
+    private readonly Forms.ToolStripMenuItem _lyricBackdropMenuItem;
+    private readonly Forms.ToolStripMenuItem _lyricBackdropTransparencyMenuItem;
     private readonly Forms.ToolStripMenuItem _lineCountMenuItem;
     private readonly Forms.ToolStripMenuItem _singleLineMenuItem;
     private readonly Forms.ToolStripMenuItem _threeLineMenuItem;
     private readonly Forms.ToolStripMenuItem _widthMenuItem;
     private readonly Forms.ToolStripMenuItem _fontSizeMenuItem;
     private readonly Forms.ToolStripMenuItem _fontColorMenuItem;
+    private readonly Forms.ToolStripMenuItem _lyricStyleMenuItem;
+    private readonly Forms.ToolStripMenuItem _backdropSettingsMenuItem;
+    private readonly Forms.ToolStripMenuItem _windowBehaviorMenuItem;
     private readonly Drawing.Icon _trayIconImage;
 
     private bool _isUpdating;
@@ -53,6 +59,8 @@ public partial class MainWindow : Window
     private bool _isPositionLocked;
     private bool _isMouseThrough;
     private bool _isAlwaysOnTop = true;
+    private bool _isLyricBackdropEnabled;
+    private double _lyricBackdropTransparency = 0.80;
     private bool _showPlaybackControls = true;
     private bool _isPlaying = true;
     private int _playbackControlsAnimationVersion;
@@ -62,8 +70,12 @@ public partial class MainWindow : Window
     private (long SongId, int LineIndex)? _lastProgressKey;
     private double _lastObservedProgress = -1;
     private int _unchangedProgressTicks;
+    private int _connectionFailureCount;
     private double _marqueeOffset;
     private double _marqueeMaxOffset;
+    private double _lastAppliedMarqueeOffset = double.NaN;
+    private double _lastClipWidth = -1;
+    private double _lastClipHeight = -1;
     private bool _isWidthIndicatorVisible;
     private int _widthIndicatorAnimationVersion;
 
@@ -71,6 +83,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         CurrentLyricText.SizeChanged += (_, _) => UpdateCurrentLyricClip();
+        SizeChanged += (_, _) => UpdateLyricBackdropRegion();
 
         _marqueeRestartTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -82,9 +95,21 @@ public partial class MainWindow : Window
             Interval = TimeSpan.FromMilliseconds(900)
         };
         _widthIndicatorTimer.Tick += WidthIndicatorTimer_Tick;
+        _playbackControlsHideTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(180)
+        };
+        _playbackControlsHideTimer.Tick += (_, _) =>
+        {
+            _playbackControlsHideTimer.Stop();
+            if (!RootGrid.IsMouseOver && !PlaybackControlsPopupSurface.IsMouseOver)
+            {
+                HidePlaybackControls();
+            }
+        };
 
-        _trayIconImage = (Drawing.Icon)Drawing.SystemIcons.Application.Clone();
-        _showHideMenuItem = new Forms.ToolStripMenuItem("隐藏歌词");
+        _trayIconImage = TrayIconFactory.Create();
+        _showHideMenuItem = new Forms.ToolStripMenuItem("隐藏歌词") { Tag = "primary:visibility" };
         _showHideMenuItem.Click += (_, _) => ToggleLyricWindow();
 
         _alwaysOnTopMenuItem = new Forms.ToolStripMenuItem("始终置顶")
@@ -100,7 +125,10 @@ public partial class MainWindow : Window
             CheckOnClick = true
         };
         _lockPositionMenuItem.CheckedChanged += (_, _) =>
+        {
             _isPositionLocked = _lockPositionMenuItem.Checked;
+            UpdateWindowBehaviorSummary();
+        };
 
         _mouseThroughMenuItem = new Forms.ToolStripMenuItem("鼠标穿透")
         {
@@ -108,6 +136,37 @@ public partial class MainWindow : Window
         };
         _mouseThroughMenuItem.CheckedChanged += (_, _) =>
             SetMouseThrough(_mouseThroughMenuItem.Checked);
+
+        _lyricBackdropMenuItem = new Forms.ToolStripMenuItem("启用毛玻璃")
+        {
+            CheckOnClick = true
+        };
+        _lyricBackdropMenuItem.CheckedChanged += (_, _) =>
+            SetLyricBackdrop(_lyricBackdropMenuItem.Checked);
+
+        _lyricBackdropTransparencyMenuItem = new Forms.ToolStripMenuItem("毛玻璃透明度")
+        {
+            ShortcutKeyDisplayString = "80%"
+        };
+        _lyricBackdropTransparencyMenuItem.DropDownItems.Add(
+            "更透明",
+            null,
+            (_, _) => SetLyricBackdropTransparency(_lyricBackdropTransparency + 0.05));
+        _lyricBackdropTransparencyMenuItem.DropDownItems.Add(
+            "更明显",
+            null,
+            (_, _) => SetLyricBackdropTransparency(_lyricBackdropTransparency - 0.05));
+        _lyricBackdropTransparencyMenuItem.DropDownItems.Add(
+            "恢复默认",
+            null,
+            (_, _) => SetLyricBackdropTransparency(0.80));
+        _lyricBackdropTransparencyMenuItem.DropDown.Closing += (_, e) =>
+        {
+            if (e.CloseReason == Forms.ToolStripDropDownCloseReason.ItemClicked)
+            {
+                e.Cancel = true;
+            }
+        };
 
         _singleLineMenuItem = new Forms.ToolStripMenuItem("一行");
         _singleLineMenuItem.Click += (_, _) => SetLineDisplayMode(false);
@@ -154,11 +213,11 @@ public partial class MainWindow : Window
         };
         AddFontColorItem("黑色", Drawing.Color.Black);
         AddFontColorItem("白色", Drawing.Color.White);
-        AddFontColorItem("蓝色", ReadableBlue);
+        AddFontColorItem("紫红色", ReadableAccent);
         _fontColorMenuItem.DropDownItems.Add(new Forms.ToolStripSeparator());
         _fontColorMenuItem.DropDownItems.Add("自定义颜色…", null, (_, _) => ChooseCustomFontColor());
 
-        var playbackMenuItem = new Forms.ToolStripMenuItem("播放控制");
+        var playbackMenuItem = new Forms.ToolStripMenuItem("播放控制") { Tag = "group:playback" };
         playbackMenuItem.DropDownItems.Add(
             "上一首",
             null,
@@ -180,22 +239,31 @@ public partial class MainWindow : Window
             SetPlaybackControlsEnabled(_showPlaybackControlsMenuItem.Checked);
         playbackMenuItem.DropDownItems.Add(_showPlaybackControlsMenuItem);
 
+        _lyricStyleMenuItem = new Forms.ToolStripMenuItem("歌词样式") { Tag = "group:lyrics" };
+        _lyricStyleMenuItem.DropDownItems.Add(_lineCountMenuItem);
+        _lyricStyleMenuItem.DropDownItems.Add(_widthMenuItem);
+        _lyricStyleMenuItem.DropDownItems.Add(_fontSizeMenuItem);
+        _lyricStyleMenuItem.DropDownItems.Add(_fontColorMenuItem);
+
+        _backdropSettingsMenuItem = new Forms.ToolStripMenuItem("毛玻璃") { Tag = "group:backdrop" };
+        _backdropSettingsMenuItem.DropDownItems.Add(_lyricBackdropMenuItem);
+        _backdropSettingsMenuItem.DropDownItems.Add(_lyricBackdropTransparencyMenuItem);
+
+        _windowBehaviorMenuItem = new Forms.ToolStripMenuItem("窗口行为") { Tag = "group:window" };
+        _windowBehaviorMenuItem.DropDownItems.Add(_alwaysOnTopMenuItem);
+        _windowBehaviorMenuItem.DropDownItems.Add(_lockPositionMenuItem);
+        _windowBehaviorMenuItem.DropDownItems.Add(_mouseThroughMenuItem);
+
         _trayMenu = new Forms.ContextMenuStrip();
-        _trayMenu.MinimumSize = new Drawing.Size(238, 0);
+        _trayMenu.MinimumSize = new Drawing.Size(268, 0);
         _trayMenu.Items.Add(CreateMenuLabel("LyricPin", "header"));
+        _trayMenu.Items.Add(CreateMenuLabel("网易云桌面歌词", "subtitle"));
+        _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add(_showHideMenuItem);
         _trayMenu.Items.Add(playbackMenuItem);
-        _trayMenu.Items.Add(new Forms.ToolStripSeparator());
-        _trayMenu.Items.Add(CreateMenuLabel("显示", "section"));
-        _trayMenu.Items.Add(_lineCountMenuItem);
-        _trayMenu.Items.Add(_widthMenuItem);
-        _trayMenu.Items.Add(_fontSizeMenuItem);
-        _trayMenu.Items.Add(_fontColorMenuItem);
-        _trayMenu.Items.Add(new Forms.ToolStripSeparator());
-        _trayMenu.Items.Add(CreateMenuLabel("窗口", "section"));
-        _trayMenu.Items.Add(_alwaysOnTopMenuItem);
-        _trayMenu.Items.Add(_lockPositionMenuItem);
-        _trayMenu.Items.Add(_mouseThroughMenuItem);
+        _trayMenu.Items.Add(_lyricStyleMenuItem);
+        _trayMenu.Items.Add(_backdropSettingsMenuItem);
+        _trayMenu.Items.Add(_windowBehaviorMenuItem);
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         var exitMenuItem = new Forms.ToolStripMenuItem("退出 LyricPin") { Tag = "danger" };
         exitMenuItem.Click += (_, _) => Close();
@@ -205,6 +273,7 @@ public partial class MainWindow : Window
         SetLyricWidth(_lyricWidth, false);
         SetFontSize(_currentFontSize);
         SetFontColor(_fontColor);
+        SetLyricBackdropTransparency(_lyricBackdropTransparency);
 
         _trayIcon = new Forms.NotifyIcon
         {
@@ -217,7 +286,7 @@ public partial class MainWindow : Window
 
         _syncTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(50)
+            Interval = TimeSpan.FromMilliseconds(60)
         };
         _syncTimer.Tick += SyncTimer_Tick;
 
@@ -228,6 +297,7 @@ public partial class MainWindow : Window
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         SetAlwaysOnTop(_isAlwaysOnTop);
+        SetLyricBackdrop(_isLyricBackdropEnabled, false);
         CloudMusicLauncher.TryLaunchWithCdpIfNotRunning();
         await UpdateLyricsAsync();
         _syncTimer.Start();
@@ -252,6 +322,7 @@ public partial class MainWindow : Window
             var nativeLyric = await _cdpService.GetCurrentLyricAsync();
             if (nativeLyric is not null)
             {
+                _connectionFailureCount = 0;
                 UpdateSyncInterval(nativeLyric);
                 UpdatePlaybackState(nativeLyric.IsPlaying);
                 var currentText = string.IsNullOrWhiteSpace(nativeLyric.Text)
@@ -268,6 +339,7 @@ public partial class MainWindow : Window
 
             if (_cdpService.IsConnected)
             {
+                _connectionFailureCount = 0;
                 SetIdleSyncInterval();
                 SetStatusText("请在网易云音乐中播放歌曲");
                 return;
@@ -275,12 +347,12 @@ public partial class MainWindow : Window
 
             if (CloudMusicLauncher.IsRunning())
             {
-                SetIdleSyncInterval();
+                SetDisconnectedSyncInterval();
                 SetStatusText("请退出网易云，然后先启动 LyricPin");
                 return;
             }
 
-            SetIdleSyncInterval();
+            SetDisconnectedSyncInterval();
             SetStatusText("正在启动网易云音乐…");
         }
         finally
@@ -293,8 +365,19 @@ public partial class MainWindow : Window
     {
         if (!_isPositionLocked && !_isMouseThrough && e.ButtonState == MouseButtonState.Pressed)
         {
-            DragMove();
-            EnsureWindowInScreenBounds();
+            HidePlaybackControls(true);
+            _syncTimer.Stop();
+            try
+            {
+                DragMove();
+                EnsureWindowInScreenBounds();
+            }
+            finally
+            {
+                _syncTimer.Interval = TimeSpan.FromMilliseconds(60);
+                _syncTimer.Start();
+                _ = UpdateLyricsAsync();
+            }
         }
     }
 
@@ -317,6 +400,11 @@ public partial class MainWindow : Window
 
     private void UpdatePlaybackState(bool isPlaying)
     {
+        if (_isPlaying == isPlaying)
+        {
+            return;
+        }
+
         _isPlaying = isPlaying;
         _playPauseMenuItem.Text = isPlaying ? "暂停" : "播放";
         PlayPauseOverlayButton.Content = isPlaying ? "\uE769" : "\uE768";
@@ -332,11 +420,28 @@ public partial class MainWindow : Window
     }
 
     private void RootGrid_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e) =>
-        HidePlaybackControls();
+        SchedulePlaybackControlsHide();
+
+    private void PlaybackControlsPopupSurface_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        _playbackControlsHideTimer.Stop();
+        ShowPlaybackControls();
+    }
+
+    private void PlaybackControlsPopupSurface_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e) =>
+        SchedulePlaybackControlsHide();
+
+    private void SchedulePlaybackControlsHide()
+    {
+        _playbackControlsHideTimer.Stop();
+        _playbackControlsHideTimer.Start();
+    }
 
     private void ShowPlaybackControls()
     {
+        _playbackControlsHideTimer.Stop();
         _playbackControlsAnimationVersion++;
+        PlaybackControlsPopup.IsOpen = true;
         PlaybackControlsPanel.Visibility = Visibility.Visible;
         PlaybackControlsPanel.IsHitTestVisible = true;
         PlaybackControlsPanel.BeginAnimation(
@@ -364,6 +469,7 @@ public partial class MainWindow : Window
 
     private void HidePlaybackControls(bool immediately = false)
     {
+        _playbackControlsHideTimer.Stop();
         var animationVersion = ++_playbackControlsAnimationVersion;
         PlaybackControlsPanel.IsHitTestVisible = false;
         if (immediately)
@@ -372,6 +478,7 @@ public partial class MainWindow : Window
             PlaybackControlsTranslateTransform.BeginAnimation(Media.TranslateTransform.YProperty, null);
             PlaybackControlsPanel.Opacity = 0;
             PlaybackControlsTranslateTransform.Y = 6;
+            PlaybackControlsPopup.IsOpen = false;
             return;
         }
 
@@ -387,6 +494,7 @@ public partial class MainWindow : Window
             if (animationVersion == _playbackControlsAnimationVersion)
             {
                 PlaybackControlsPanel.Opacity = 0;
+                PlaybackControlsPopup.IsOpen = false;
             }
         };
         PlaybackControlsPanel.BeginAnimation(OpacityProperty, fade);
@@ -398,9 +506,7 @@ public partial class MainWindow : Window
     private void SetPlaybackControlsEnabled(bool enabled)
     {
         _showPlaybackControls = enabled;
-        PlaybackControlsHost.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         HidePlaybackControls(true);
-        UpdateWindowHeight();
 
         if (enabled && RootGrid.IsMouseOver && !_isMouseThrough)
         {
@@ -412,7 +518,9 @@ public partial class MainWindow : Window
     {
         if (IsVisible)
         {
+            HidePlaybackControls(true);
             Hide();
+            _syncTimer.Interval = TimeSpan.FromMilliseconds(500);
             _showHideMenuItem.Text = "显示歌词";
             return;
         }
@@ -428,6 +536,7 @@ public partial class MainWindow : Window
         }
 
         EnsureWindowInScreenBounds();
+        _syncTimer.Interval = TimeSpan.FromMilliseconds(60);
         SetAlwaysOnTop(_isAlwaysOnTop);
         Activate();
         ScheduleHorizontalMarquee();
@@ -442,9 +551,9 @@ public partial class MainWindow : Window
     private static void ApplyMenuStyle(Forms.ToolStripDropDown menu, Forms.ToolStripRenderer renderer)
     {
         menu.Renderer = renderer;
-        menu.BackColor = Drawing.Color.FromArgb(28, 31, 38);
-        menu.ForeColor = Drawing.Color.FromArgb(238, 240, 245);
-        menu.Font = new Drawing.Font("Microsoft YaHei UI", 9f, Drawing.FontStyle.Regular, Drawing.GraphicsUnit.Point);
+        menu.BackColor = Drawing.Color.FromArgb(248, 246, 249);
+        menu.ForeColor = Drawing.Color.FromArgb(31, 27, 35);
+        menu.Font = new Drawing.Font("Microsoft YaHei UI", 9.25f, Drawing.FontStyle.Regular, Drawing.GraphicsUnit.Point);
         menu.Padding = new Forms.Padding(7);
 
         if (menu is Forms.ToolStripDropDownMenu dropDownMenu)
@@ -458,28 +567,33 @@ public partial class MainWindow : Window
             if (item is Forms.ToolStripLabel label)
             {
                 var isHeader = string.Equals(label.Tag as string, "header", StringComparison.Ordinal);
+                var isSubtitle = string.Equals(label.Tag as string, "subtitle", StringComparison.Ordinal);
                 label.ForeColor = isHeader
-                    ? Drawing.Color.FromArgb(244, 246, 251)
-                    : Drawing.Color.FromArgb(132, 141, 158);
+                    ? Drawing.Color.FromArgb(27, 23, 31)
+                    : isSubtitle
+                        ? Drawing.Color.FromArgb(92, 84, 100)
+                        : Drawing.Color.FromArgb(92, 84, 100);
                 label.Font = new Drawing.Font(
                     "Microsoft YaHei UI",
-                    isHeader ? 11f : 8.5f,
-                    Drawing.FontStyle.Bold,
+                    isHeader ? 13f : 8.5f,
+                    isHeader ? Drawing.FontStyle.Bold : Drawing.FontStyle.Regular,
                     Drawing.GraphicsUnit.Point);
                 label.Padding = isHeader
-                    ? new Forms.Padding(10, 7, 10, 5)
-                    : new Forms.Padding(10, 7, 10, 2);
+                    ? new Forms.Padding(13, 9, 12, 1)
+                    : isSubtitle
+                        ? new Forms.Padding(14, 0, 12, 7)
+                        : new Forms.Padding(12, 6, 12, 2);
                 label.Margin = new Forms.Padding(1, 0, 1, 0);
                 continue;
             }
 
             if (item is Forms.ToolStripSeparator)
             {
-                item.Margin = new Forms.Padding(4, 2, 4, 2);
+                item.Margin = new Forms.Padding(4, 1, 4, 1);
                 continue;
             }
 
-            item.Padding = new Forms.Padding(10, 6, 10, 6);
+            item.Padding = new Forms.Padding(14, 6, 13, 6);
             item.Margin = new Forms.Padding(2, 1, 2, 1);
             if (item is Forms.ToolStripMenuItem menuItem && menuItem.HasDropDownItems)
             {
@@ -678,6 +792,12 @@ public partial class MainWindow : Window
 
     private void UpdateSyncInterval(Models.CloudMusicLyricSnapshot lyric)
     {
+        if (!IsVisible)
+        {
+            _syncTimer.Interval = TimeSpan.FromMilliseconds(500);
+            return;
+        }
+
         var progressKey = (lyric.SongId, lyric.LineIndex);
         if (progressKey == _lastProgressKey &&
             Math.Abs(lyric.LineProgress - _lastObservedProgress) < 0.0001)
@@ -689,12 +809,12 @@ public partial class MainWindow : Window
             _lastProgressKey = progressKey;
             _lastObservedProgress = lyric.LineProgress;
             _unchangedProgressTicks = 0;
-            _syncTimer.Interval = TimeSpan.FromMilliseconds(50);
+            _syncTimer.Interval = TimeSpan.FromMilliseconds(60);
         }
 
         if (_unchangedProgressTicks >= 10)
         {
-            _syncTimer.Interval = TimeSpan.FromMilliseconds(200);
+            _syncTimer.Interval = TimeSpan.FromMilliseconds(250);
         }
     }
 
@@ -704,6 +824,16 @@ public partial class MainWindow : Window
         _lastObservedProgress = -1;
         _unchangedProgressTicks = 0;
         _syncTimer.Interval = TimeSpan.FromMilliseconds(500);
+    }
+
+    private void SetDisconnectedSyncInterval()
+    {
+        _lastProgressKey = null;
+        _lastObservedProgress = -1;
+        _unchangedProgressTicks = 0;
+        _connectionFailureCount = Math.Min(_connectionFailureCount + 1, 5);
+        var delay = Math.Min(5000, 500 * (1 << (_connectionFailureCount - 1)));
+        _syncTimer.Interval = TimeSpan.FromMilliseconds(delay);
     }
 
     private void ChangeFontSize(double delta)
@@ -723,6 +853,7 @@ public partial class MainWindow : Window
         UpdateWindowHeight();
         ScheduleHorizontalMarquee();
         _fontSizeMenuItem.ShortcutKeyDisplayString = $"{_currentFontSize:0} px";
+        UpdateLyricStyleSummary();
     }
 
     private void SetLyricWidth(double width, bool showIndicator = true)
@@ -740,6 +871,7 @@ public partial class MainWindow : Window
         }
         Width = newWindowWidth;
         _widthMenuItem.ShortcutKeyDisplayString = $"{_lyricWidth:0} px";
+        UpdateLyricStyleSummary();
         if (showIndicator)
         {
             ShowWidthIndicator();
@@ -835,7 +967,7 @@ public partial class MainWindow : Window
         {
             var value when value == Drawing.Color.Black.ToArgb() => "黑色",
             var value when value == Drawing.Color.White.ToArgb() => "白色",
-            var value when value == ReadableBlue.ToArgb() => "蓝色",
+            var value when value == ReadableAccent.ToArgb() => "紫红色",
             _ => $"#{color.R:X2}{color.G:X2}{color.B:X2}"
         };
         foreach (Forms.ToolStripItem item in _fontColorMenuItem.DropDownItems)
@@ -872,6 +1004,7 @@ public partial class MainWindow : Window
             ? extendedStyle | WsExTransparent
             : extendedStyle & ~WsExTransparent;
         SetWindowLongPtr(handle, GwlExStyle, new IntPtr(extendedStyle));
+        UpdateWindowBehaviorSummary();
     }
 
     private void SetAlwaysOnTop(bool enabled)
@@ -894,6 +1027,118 @@ public partial class MainWindow : Window
             0,
             SwpNoMove | SwpNoSize | SwpNoActivate);
         _nextTopmostRefreshAt = DateTime.UtcNow.AddSeconds(2);
+        UpdateWindowBehaviorSummary();
+    }
+
+    private void SetLyricBackdrop(bool enabled, bool animate = true)
+    {
+        _isLyricBackdropEnabled = enabled;
+        UpdateBackdropSettingsSummary();
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero)
+        {
+            WindowBackdropHelper.SetAcrylic(handle, enabled, _lyricBackdropTransparency);
+            if (enabled)
+            {
+                UpdateLyricBackdropRegion();
+            }
+            else
+            {
+                WindowBackdropHelper.ClearRoundedRegion(handle);
+            }
+        }
+
+        LyricBackdrop.BeginAnimation(OpacityProperty, null);
+        if (!animate)
+        {
+            LyricBackdrop.Opacity = enabled ? 1 : 0;
+            return;
+        }
+
+        var fade = new Animation.DoubleAnimation(
+            LyricBackdrop.Opacity,
+            enabled ? 1 : 0,
+            TimeSpan.FromMilliseconds(enabled ? 180 : 140))
+        {
+            EasingFunction = new Animation.QuadraticEase
+            {
+                EasingMode = enabled
+                    ? Animation.EasingMode.EaseOut
+                    : Animation.EasingMode.EaseIn
+            }
+        };
+        LyricBackdrop.BeginAnimation(OpacityProperty, fade);
+    }
+
+    private void SetLyricBackdropTransparency(double transparency)
+    {
+        _lyricBackdropTransparency = Math.Clamp(transparency, 0.40, 0.95);
+        var surfaceOpacity = (byte)Math.Round((1 - _lyricBackdropTransparency) * 255);
+        LyricBackdrop.Background = new Media.SolidColorBrush(
+            Media.Color.FromArgb(surfaceOpacity, 23, 26, 33));
+        _lyricBackdropTransparencyMenuItem.ShortcutKeyDisplayString =
+            $"{_lyricBackdropTransparency:P0}";
+        UpdateBackdropSettingsSummary();
+
+        if (!_isLyricBackdropEnabled)
+        {
+            return;
+        }
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero)
+        {
+            WindowBackdropHelper.SetAcrylic(handle, true, _lyricBackdropTransparency);
+        }
+    }
+
+    private void UpdateLyricStyleSummary()
+    {
+        _lyricStyleMenuItem.ShortcutKeyDisplayString =
+            $"{(_showThreeLines ? "三行" : "一行")}  ·  {_currentFontSize:0} px";
+    }
+
+    private void UpdateBackdropSettingsSummary()
+    {
+        _backdropSettingsMenuItem.ShortcutKeyDisplayString = _isLyricBackdropEnabled
+            ? $"{_lyricBackdropTransparency:P0}"
+            : "关闭";
+    }
+
+    private void UpdateWindowBehaviorSummary()
+    {
+        _windowBehaviorMenuItem.ShortcutKeyDisplayString = _isMouseThrough
+            ? "鼠标穿透"
+            : _isPositionLocked
+                ? "已固定"
+                : _isAlwaysOnTop
+                    ? "置顶"
+                    : "普通";
+    }
+
+    private void UpdateLyricBackdropRegion()
+    {
+        if (!_isLyricBackdropEnabled)
+        {
+            return;
+        }
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var dpi = Media.VisualTreeHelper.GetDpi(this);
+        WindowBackdropHelper.SetRoundedRegion(
+            handle,
+            Math.Max(1, ActualWidth) * dpi.DpiScaleX,
+            Math.Max(1, ActualHeight) * dpi.DpiScaleY,
+            18 * Math.Max(dpi.DpiScaleX, dpi.DpiScaleY),
+            false,
+            0,
+            0);
     }
 
     private void MaintainWindowLevel()
@@ -935,6 +1180,7 @@ public partial class MainWindow : Window
         _singleLineMenuItem.Checked = !showThreeLines;
         _threeLineMenuItem.Checked = showThreeLines;
         _lineCountMenuItem.ShortcutKeyDisplayString = showThreeLines ? "三行" : "一行";
+        UpdateLyricStyleSummary();
         UpdateWindowHeight();
         ScheduleHorizontalMarquee();
     }
@@ -945,9 +1191,7 @@ public partial class MainWindow : Window
         var contentHeight = _showThreeLines
             ? Math.Max(80, _currentFontSize + secondarySize * 2 + 28)
             : Math.Max(44, _currentFontSize + 24);
-        var newHeight = contentHeight +
-                        (_isWidthIndicatorVisible ? 12 : 0) +
-                        (_showPlaybackControls ? 42 : 0);
+        var newHeight = contentHeight + (_isWidthIndicatorVisible ? 12 : 0);
 
         if (IsLoaded && preserveCenter)
         {
@@ -1000,11 +1244,17 @@ public partial class MainWindow : Window
 
     private void UpdateCurrentLyricClip()
     {
-        CurrentLyricClip.Rect = new Rect(
-            0,
-            0,
-            CurrentLyricText.ActualWidth * _lineProgress,
-            CurrentLyricText.ActualHeight);
+        var width = CurrentLyricText.ActualWidth * _lineProgress;
+        var height = CurrentLyricText.ActualHeight;
+        if (Math.Abs(width - _lastClipWidth) < 0.5 &&
+            Math.Abs(height - _lastClipHeight) < 0.5)
+        {
+            return;
+        }
+
+        _lastClipWidth = width;
+        _lastClipHeight = height;
+        CurrentLyricClip.Rect = new Rect(0, 0, width, height);
     }
 
     private void ScheduleHorizontalMarquee(bool restart = true)
@@ -1014,7 +1264,7 @@ public partial class MainWindow : Window
         _marqueeMaxOffset = 0;
         CurrentLyricTranslateTransform.BeginAnimation(Media.TranslateTransform.XProperty, null);
         CurrentLyricTranslateTransform.X = 0;
-        CurrentLyricViewport.ScrollToHorizontalOffset(0);
+        ApplyCurrentLyricScrollOffset(0);
         if (restart)
         {
             _marqueeRestartTimer.Start();
@@ -1037,7 +1287,7 @@ public partial class MainWindow : Window
         CurrentLyricTranslateTransform.X = 0;
         if (_marqueeMaxOffset <= 1 || !IsVisible)
         {
-            CurrentLyricViewport.ScrollToHorizontalOffset(0);
+            ApplyCurrentLyricScrollOffset(0);
             return;
         }
 
@@ -1078,7 +1328,7 @@ public partial class MainWindow : Window
     {
         if (_marqueeMaxOffset <= 1 || CurrentLyricViewport.ViewportWidth <= 1)
         {
-            CurrentLyricViewport.ScrollToHorizontalOffset(0);
+            ApplyCurrentLyricScrollOffset(0);
             return;
         }
 
@@ -1094,7 +1344,19 @@ public partial class MainWindow : Window
             1);
 
         _marqueeOffset = _marqueeMaxOffset * scrollProgress;
-        CurrentLyricViewport.ScrollToHorizontalOffset(_marqueeOffset);
+        ApplyCurrentLyricScrollOffset(_marqueeOffset);
+    }
+
+    private void ApplyCurrentLyricScrollOffset(double offset)
+    {
+        if (double.IsFinite(_lastAppliedMarqueeOffset) &&
+            Math.Abs(offset - _lastAppliedMarqueeOffset) < 0.5)
+        {
+            return;
+        }
+
+        _lastAppliedMarqueeOffset = offset;
+        CurrentLyricViewport.ScrollToHorizontalOffset(offset);
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
@@ -1102,6 +1364,8 @@ public partial class MainWindow : Window
         _syncTimer.Stop();
         _marqueeRestartTimer.Stop();
         _widthIndicatorTimer.Stop();
+        _playbackControlsHideTimer.Stop();
+        PlaybackControlsPopup.IsOpen = false;
         _cdpService.Dispose();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();

@@ -5,17 +5,15 @@ namespace LyricPin.Ui;
 
 internal static class AcrylicMenuHelper
 {
-    private const int WindowCompositionAttributeAccentPolicy = 19;
-    private const int AccentEnableAcrylicBlurBehind = 4;
     private const int DwmWindowAttributeUseImmersiveDarkMode = 20;
     private const int DwmWindowAttributeWindowCornerPreference = 33;
     private const int DwmWindowAttributeSystemBackdropType = 38;
     private const int DwmWindowCornerPreferenceRound = 2;
-    private const int DwmSystemBackdropTypeTransientWindow = 3;
+    private const int DwmSystemBackdropTypeNone = 1;
 
     internal static void Attach(ToolStripDropDown menu)
     {
-        menu.Opacity = 0.99;
+        menu.Opacity = 1;
         menu.Opened += (_, _) => Apply(menu.Handle);
 
         foreach (ToolStripItem item in menu.Items)
@@ -36,7 +34,7 @@ internal static class AcrylicMenuHelper
 
         try
         {
-            var enabled = 1;
+            var enabled = 0;
             DwmSetWindowAttribute(
                 windowHandle,
                 DwmWindowAttributeUseImmersiveDarkMode,
@@ -50,17 +48,13 @@ internal static class AcrylicMenuHelper
                 ref cornerPreference,
                 sizeof(int));
 
-            var backdropType = DwmSystemBackdropTypeTransientWindow;
+            var backdropType = DwmSystemBackdropTypeNone;
             DwmSetWindowAttribute(
                 windowHandle,
                 DwmWindowAttributeSystemBackdropType,
                 ref backdropType,
                 sizeof(int));
 
-            if (Environment.OSVersion.Version.Build < 22000)
-            {
-                ApplyLegacyAcrylic(windowHandle);
-            }
         }
         catch (DllNotFoundException)
         {
@@ -71,57 +65,6 @@ internal static class AcrylicMenuHelper
             // The solid translucent menu remains usable on older Windows versions.
         }
     }
-
-    private static void ApplyLegacyAcrylic(IntPtr windowHandle)
-    {
-        var policy = new AccentPolicy
-        {
-            AccentState = AccentEnableAcrylicBlurBehind,
-            AccentFlags = 2,
-            // AABBGGRR: a cool charcoal tint with enough transparency for blur.
-            GradientColor = unchecked((int)0xCC2F2822)
-        };
-
-        var policySize = Marshal.SizeOf<AccentPolicy>();
-        var policyPointer = Marshal.AllocHGlobal(policySize);
-        try
-        {
-            Marshal.StructureToPtr(policy, policyPointer, false);
-            var data = new WindowCompositionAttributeData
-            {
-                Attribute = WindowCompositionAttributeAccentPolicy,
-                Data = policyPointer,
-                SizeOfData = policySize
-            };
-            SetWindowCompositionAttribute(windowHandle, ref data);
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(policyPointer);
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct AccentPolicy
-    {
-        public int AccentState;
-        public int AccentFlags;
-        public int GradientColor;
-        public int AnimationId;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct WindowCompositionAttributeData
-    {
-        public int Attribute;
-        public IntPtr Data;
-        public int SizeOfData;
-    }
-
-    [DllImport("user32.dll")]
-    private static extern int SetWindowCompositionAttribute(
-        IntPtr windowHandle,
-        ref WindowCompositionAttributeData data);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(
