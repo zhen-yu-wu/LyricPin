@@ -8,32 +8,23 @@ internal static class WindowBackdropHelper
     private const int AccentDisabled = 0;
     private const int AccentEnableBlurBehind = 3;
 
-    internal static void SetAcrylic(
+    internal static void SetBlur(
         IntPtr windowHandle,
-        bool enabled,
-        double transparency)
+        bool enabled)
     {
         if (windowHandle == IntPtr.Zero)
         {
             return;
         }
 
-        var tintAlpha = (byte)Math.Clamp(
-            Math.Round((1 - transparency) * 255),
-            8,
-            153);
         var policy = new AccentPolicy
         {
-            // BLURBEHIND is composited more cheaply than the Acrylic state. It
-            // keeps the live background visible without making window dragging
-            // stutter on transparent WPF windows.
+            // Acrylic can paint rectangular fringes on layered WPF windows.
+            // Keep native blur, with material detail provided by the clipped WPF surface.
             AccentState = enabled ? AccentEnableBlurBehind : AccentDisabled,
             AccentFlags = 0,
-            // AABBGGRR: a neutral charcoal tint that remains readable over light
-            // and dark windows while still allowing the blurred scene through.
-            GradientColor = enabled
-                ? unchecked((int)(((uint)tintAlpha << 24) | 0x00211A17u))
-                : 0
+            // Tint only the clipped WPF surface; native tint also covers transparent corners.
+            GradientColor = 0
         };
 
         var policySize = Marshal.SizeOf<AccentPolicy>();
@@ -81,8 +72,8 @@ internal static class WindowBackdropHelper
         var region = CreateRoundRectRgn(
             0,
             0,
-            (int)Math.Ceiling(width) + 1,
-            (int)Math.Ceiling(lyricHeight) + 1,
+            (int)Math.Ceiling(width),
+            (int)Math.Ceiling(lyricHeight),
             diameter,
             diameter);
         if (region == IntPtr.Zero)
@@ -110,6 +101,10 @@ internal static class WindowBackdropHelper
             }
         }
 
+        // SetWindowRgn clips the window, but the compositor needs its own blur mask.
+        // DWM copies this region, so it can subsequently be transferred to the window.
+        ApplyBlurRegion(windowHandle, true, region);
+
         // Windows owns the region after a successful SetWindowRgn call.
         if (SetWindowRgn(windowHandle, region, true) == 0)
         {
@@ -121,9 +116,48 @@ internal static class WindowBackdropHelper
     {
         if (windowHandle != IntPtr.Zero)
         {
+            ApplyBlurRegion(windowHandle, false, IntPtr.Zero);
             SetWindowRgn(windowHandle, IntPtr.Zero, true);
         }
     }
+
+    private static void ApplyBlurRegion(IntPtr windowHandle, bool enabled, IntPtr region)
+    {
+        var blur = new DwmBlurBehind
+        {
+            Flags = 0x1 | 0x2, // DWM_BB_ENABLE | DWM_BB_BLURREGION
+            Enabled = enabled,
+            Region = region
+        };
+        try
+        {
+            var result = DwmEnableBlurBehindWindow(windowHandle, ref blur);
+            if (result < 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"DWM blur mask failed: 0x{result:X8}");
+            }
+        }
+        catch (DllNotFoundException)
+        {
+            // Keep the clipped translucent surface if DWM is unavailable.
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Keep the clipped translucent surface if DWM is unavailable.
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DwmBlurBehind
+    {
+        public uint Flags;
+        [MarshalAs(UnmanagedType.Bool)] public bool Enabled;
+        public IntPtr Region;
+        [MarshalAs(UnmanagedType.Bool)] public bool TransitionOnMaximized;
+    }
+
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmEnableBlurBehindWindow(IntPtr windowHandle, ref DwmBlurBehind blur);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct AccentPolicy

@@ -55,13 +55,21 @@
         </Grid.RowDefinitions>
         <Border x:Name="LyricBackdrop"
                 Grid.RowSpan="2"
-                Margin="2"
+                Margin="0"
                 Background="#33171A21"
-                BorderBrush="Transparent"
-                BorderThickness="0"
+                BorderThickness="1"
                 CornerRadius="16"
                 IsHitTestVisible="False"
-                Opacity="0" />
+                Opacity="0">
+            <Border.BorderBrush>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0.7,1">
+                    <GradientStop Color="#24FFFFFF" Offset="0" />
+                    <GradientStop Color="#10FFFFFF" Offset="0.45" />
+                    <GradientStop Color="#18000000" Offset="1" />
+                </LinearGradientBrush>
+            </Border.BorderBrush>
+            <Border x:Name="LyricBackdropGrain" CornerRadius="15" Opacity="0.15" />
+        </Border>
         <ScrollViewer x:Name="LyricsViewport"
                       Grid.Row="0"
                       Width="300"

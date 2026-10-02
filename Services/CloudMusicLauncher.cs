@@ -19,12 +19,19 @@ public static class CloudMusicLauncher
             return false;
         }
 
-        Process.Start(new ProcessStartInfo
+        var process = Process.Start(new ProcessStartInfo
         {
             FileName = executable,
             Arguments = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=9223",
-            UseShellExecute = true
+            UseShellExecute = true,
+            WindowStyle = ProcessWindowStyle.Hidden
         });
+        if (process is null)
+        {
+            return false;
+        }
+
+        _ = BackgroundWindowHelper.HideLaunchedWindowAsync(process);
         return true;
     }
 
