@@ -237,6 +237,12 @@ public partial class MainWindow
         };
         _syncTimer.Tick += SyncTimer_Tick;
 
+        _windowLevelTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(500)
+        };
+        _windowLevelTimer.Tick += (_, _) => MaintainWindowLevel();
+
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
     }

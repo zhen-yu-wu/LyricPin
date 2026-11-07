@@ -39,6 +39,9 @@ public partial class MainWindow
     private static extern int SetWindowLong32(IntPtr windowHandle, int index, int newValue);
 
     [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(
         IntPtr windowHandle,

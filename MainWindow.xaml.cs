@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     private static readonly Drawing.Color ReadableAccent = Drawing.Color.FromArgb(193, 63, 176);
     private readonly CloudMusicCdpService _cdpService = new();
     private readonly DispatcherTimer _syncTimer;
+    private readonly DispatcherTimer _windowLevelTimer;
     private readonly DispatcherTimer _marqueeRestartTimer;
     private readonly DispatcherTimer _widthIndicatorTimer;
     private readonly DispatcherTimer _playbackControlsHideTimer;
@@ -59,7 +60,7 @@ public partial class MainWindow : Window
     private bool _showPlaybackControls = true;
     private bool _isPlaying = true;
     private int _playbackControlsAnimationVersion;
-    private DateTime _nextTopmostRefreshAt;
+    private IntPtr _lastForegroundWindow;
     private (long SongId, int LineIndex)? _lastTransitionKey;
     private int _transitionAnimationVersion;
     private (long SongId, int LineIndex)? _lastProgressKey;
@@ -77,6 +78,7 @@ public partial class MainWindow : Window
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         SetAlwaysOnTop(_isAlwaysOnTop);
+        _windowLevelTimer.Start();
         SetLyricBackdrop(_isLyricBackdropEnabled, false);
         CloudMusicLauncher.TryLaunchWithCdpIfNotRunning();
         await UpdateLyricsAsync();
@@ -88,7 +90,6 @@ public partial class MainWindow : Window
 
     private async void SyncTimer_Tick(object? sender, EventArgs e)
     {
-        MaintainWindowLevel();
         await UpdateLyricsAsync();
     }
 
@@ -752,7 +753,7 @@ public partial class MainWindow : Window
             0,
             0,
             SwpNoMove | SwpNoSize | SwpNoActivate);
-        _nextTopmostRefreshAt = DateTime.UtcNow.AddSeconds(2);
+        _lastForegroundWindow = GetForegroundWindow();
         UpdateWindowBehaviorSummary();
     }
 
@@ -882,24 +883,27 @@ public partial class MainWindow : Window
 
     private void MaintainWindowLevel()
     {
-        if (!_isAlwaysOnTop || !IsVisible || DateTime.UtcNow < _nextTopmostRefreshAt)
+        // Respect temporary Topmost=false while a color dialog is open.
+        if (_isClosed || !_isAlwaysOnTop || !Topmost || !IsVisible)
         {
             return;
         }
 
         var handle = new WindowInteropHelper(this).Handle;
-        if (handle != IntPtr.Zero)
+        if (handle == IntPtr.Zero)
         {
-            SetWindowPos(
-                handle,
-                HwndTopmost,
-                0,
-                0,
-                0,
-                0,
-                SwpNoMove | SwpNoSize | SwpNoActivate);
+            return;
         }
-        _nextTopmostRefreshAt = DateTime.UtcNow.AddSeconds(2);
+
+        var foreground = GetForegroundWindow();
+        var foregroundChanged = foreground != _lastForegroundWindow;
+        _lastForegroundWindow = foreground;
+        if (!foregroundChanged && !WindowLevelHelper.IsCoveredByAnotherTopmostWindow(handle))
+        {
+            return;
+        }
+
+        WindowLevelHelper.RestoreTopmost(handle);
     }
 
     private void SetLineDisplayMode(bool showThreeLines)
@@ -1102,6 +1106,7 @@ public partial class MainWindow : Window
     {
         _isClosed = true;
         _syncTimer.Stop();
+        _windowLevelTimer.Stop();
         _marqueeRestartTimer.Stop();
         _widthIndicatorTimer.Stop();
         _playbackControlsHideTimer.Stop();

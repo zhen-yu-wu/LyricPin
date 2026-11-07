@@ -137,10 +137,14 @@ public sealed partial class CloudMusicCdpService : IDisposable
         await using var stream = await response.Content.ReadAsStreamAsync(_shutdownToken);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: _shutdownToken);
 
+        // Desktop lyrics and pets also expose orpheus pages. Only the main
+        // application owns the player store used by the lyric reader.
         var target = document.RootElement.EnumerateArray().FirstOrDefault(item =>
             item.TryGetProperty("type", out var type) && type.GetString() == "page" &&
             item.TryGetProperty("url", out var url) &&
-            url.GetString()?.StartsWith("orpheus://", StringComparison.Ordinal) == true);
+            Uri.TryCreate(url.GetString(), UriKind.Absolute, out var pageUri) &&
+            pageUri.Scheme == "orpheus" &&
+            pageUri.AbsolutePath.Equals("/pub/app.html", StringComparison.OrdinalIgnoreCase));
 
         if (target.ValueKind == JsonValueKind.Undefined ||
             !target.TryGetProperty("webSocketDebuggerUrl", out var webSocketUrl))
